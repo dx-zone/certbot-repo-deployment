@@ -1,0 +1,135 @@
+# =========================================================
+# 🐍 Python / uv / Virtual Environments
+# =========================================================
+
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+
+# uv cache
+.uv/
+uv.lock
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.dmypy.json
+
+# =========================================================
+# 🧠 JetBrains IDE
+# =========================================================
+
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# =========================================================
+# 📦 Ansible Artifacts
+# =========================================================
+
+*.retry
+.fact_cache/
+.cache/
+.molecule/
+molecule/*/.cache/
+molecule/*/.pytest_cache/
+collections/ansible_collections/
+
+output.txt
+*.output.txt
+*.log
+*.log.*
+ansible.log
+
+# =========================================================
+# 🔐 Vault / Secrets
+# =========================================================
+
+# This excludes the actual secrets
+.vault_pass*
+vault_pass*
+*.vault
+vault.yml
+vault.yaml
+group_vars/*
+
+.env
+.env.*
+*.env
+
+# Allow to add only these examples
+!vault.yml.example
+!vault.yaml.example
+
+# =========================================================
+# 🔑 PKI / Certificates / Private Keys
+# =========================================================
+
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.csr
+*.bundle
+*.chain
+*.gpg
+*.asc
+
+# =========================================================
+# 🐳 Docker / Runtime Data
+# =========================================================
+
+docker-compose.override.yml
+
+# Runtime bind-mount / persistent data directories
+datastore/
+data/
+_data/
+runtime/
+docker-data/
+
+# =========================================================
+# ⚙️ Config Files
+# =========================================================
+
+# Ignore ALL .ini files (adjust if inventory should be tracked)
+*.ini
+!inventory/hosts.ini
+
+*.local
+*.bak
+*.tmp
+*.swp
+
+# =========================================================
+# 🖥 OS Files
+# =========================================================
+
+.DS_Store
+Thumbs.db
+
+# =========================================================
+# 📂 Misc Output
+# =========================================================
+
+output/
+reports/
+coverage/
