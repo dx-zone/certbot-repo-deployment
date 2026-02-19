@@ -1,0 +1,278 @@
+# -----------------------------------------------------------------------------
+# Role Defaults
+#
+# These variables define the desired behavior of the certbot-repo-deployment
+# role. They control:
+#   - Docker installation strategy
+#   - Runtime validation behavior
+#   - Repository checkout configuration
+#   - Persistent bind-mount paths
+#   - Docker Compose execution behavior
+#
+# All values can be overridden at playbook or inventory level.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Docker Installation Settings
+# -----------------------------------------------------------------------------
+
+# Installation flavor:
+#   ce      → Install Docker Community Edition from official Docker repos
+#   distro  → Use distribution-provided Docker packages (future support)
+docker_install_flavor: "ce"
+
+# Perform container runtime validation after Docker installation.
+# Verifies that containers can start and exit successfully.
+docker_run_container_test: True
+
+# Ensure Docker Compose v2 plugin is installed.
+docker_compose_plugin: True
+
+
+# -----------------------------------------------------------------------------
+# Repository Configuration
+# -----------------------------------------------------------------------------
+
+# Git repository containing the certbot RPM mTLS stack.
+certbot_repo_url: "https://github.com/dx-zone/certbot-rpm-mtls-repo"
+
+# Branch, tag, or commit to deploy.
+certbot_repo_version: "main"
+
+# Root directory where the repository will be cloned on the target host.
+certbot_repo_dir: "/opt/certbot"
+
+
+# -----------------------------------------------------------------------------
+# Filesystem Ownership
+# -----------------------------------------------------------------------------
+
+# Ownership applied to repository and bind-mount directories.
+# Default assumes containers run as UID/GID 1000.
+certbot_repo_owner: "1000"
+certbot_repo_group: "1000"
+
+
+# -----------------------------------------------------------------------------
+# Persistent Host Paths (Bind Mount Sources)
+# -----------------------------------------------------------------------------
+
+# Let’s Encrypt certificate storage (Certbot container)
+certbot_data_dir: "{{ certbot_repo_dir }}/datastore/certbot-data/letsencrypt"
+
+# RPM repository storage directory (RPM repo container)
+rpmrepo_rpms_dir: "{{ certbot_repo_dir }}/datastore/rpmrepo-data/rpms"
+
+# DNS provider configuration files (*.ini)
+certbot_ini_dir: "{{ certbot_repo_dir }}/secrets/certbot-secrets/ini"
+
+# mTLS PKI material (CA, client certs, keys)
+rpmrepo_pki_dir: "{{ certbot_repo_dir }}/secrets/rpmrepo-secrets/pki_mtls_material"
+
+# -----------------------------------------------------------------------------
+# Template Output Paths (Host-side bind mounts)
+# -----------------------------------------------------------------------------
+
+# Certificate inventory CSV (input to certbot manager)
+certbot_cert_inventory_file: "{{ certbot_data_dir }}/certificates.csv"
+
+
+# -----------------------------------------------------------------------------
+# Stack Environment (.env) Variables
+#
+# The upstream docker-compose stack expects a .env file in the repository root.
+# This role renders that file so the deployment is reproducible and non-interactive.
+#
+# REPO_FQDN
+#   - Used by rpmrepo (Apache) to set ServerName and select TLS cert paths
+#   - MUST be present in certificates.csv for Let's Encrypt issuance
+#   - Used by client-test to resolve the repository hostname
+#
+# CA_NAME
+#   - Common Name label for the internal mTLS client CA (trust store display name)
+#
+# CLIENT_NAME
+#   - File/identity prefix for the mTLS client certificate and key
+#   - In production you may want this to match the client hostname/identity
+# -----------------------------------------------------------------------------
+certbot_stack_repo_fqdn: "repo.example.com"
+certbot_stack_ca_name: "Internal-RPM-Repo-CA"
+certbot_stack_client_name: "client-identity"
+
+# Render .env file in the repo root (docker-compose expects this)
+certbot_stack_env_file: "{{ certbot_repo_dir }}/.env"
+
+
+# -----------------------------------------------------------------------------
+# Docker Compose Behavior Controls
+# -----------------------------------------------------------------------------
+
+# Build behavior for community.docker.docker_compose_v2:
+#   policy → Build only when Compose indicates a build context (default behavior)
+#   always → Always build images before starting containers
+#   never  → Never build images (use existing images only)
+compose_build: "policy"
+
+# Image pull behavior:
+#   policy → Pull if missing
+#   always → Always pull latest
+#   never  → Never pull
+compose_pull: "policy"
+
+# Container recreation policy:
+#   auto   → Recreate only if configuration changed
+#   always → Force recreation
+#   never  → Never recreate
+compose_recreate: "auto"
+
+
+# -----------------------------------------------------------------------------
+# Post-Deployment Validation
+# -----------------------------------------------------------------------------
+
+# Run the validate-pki-pipeline.sh script after stack startup.
+run_pipeline_validation: True
+
+
+# -----------------------------------------------------------------------------
+# Secrets for DNS provider credentials (used by Certbot DNS-01 plugins)
+#
+# Do NOT store real secrets in defaults. Override via group_vars/host_vars,
+# Ansible Vault, external secret managers, or environment injection.
+#
+# Recommended Ansible Vault layout:
+#   mkdir -p group_vars/certbot_hosts
+#   ansible-vault create --vault-id dev@./.vault_pass_dev group_vars/certbot_hosts/vault.yml
+#
+# Example vault.yml contents:
+#   cloudflare_api_token: "..."
+#
+# Run:
+#   ansible-playbook -i inventory/hosts.ini playbooks/deploy-certbot-repo.yml \
+#     --vault-id dev@./.vault_pass_dev
+# -----------------------------------------------------------------------------
+#
+# API key for Cloudflare DNS provider
+cloudflare_api_token: ""          # Placeholder (Route53 usually uses AWS creds/roles)
+
+# API key for AWS Route53 DNS provider
+route53_creds_token: ""          # Placeholder (Route53 usually uses AWS creds/roles)
+
+# TSIG key for BIND DNS server
+# Placeholder (usually needs name/secret/algo/server)
+rfc2136_tsig_key_name: ""
+rfc2136_tsig_key_secret: ""
+rfc2136_tsig_key_algorithm: ""
+rfc2136_tsig_key_server: ""
+rfc2136_tsig_key_port: ""
+
+# TSIG key for BIND DNS server
+# Placeholder (usually needs name/secret/algo/server) (often RFC2136-style)
+bind_tsig_name: ""
+bind_tsig_secret: ""
+bind_tsig_algorithm: ""
+bind_tsig_server: ""
+bind_tsig_port: ""
+
+
+# -----------------------------------------------------------------------------
+# Role Variables (Weak/Lower Precedence)
+#
+# This file defines the DNS provider configuration used to:
+#   1) Render provider credential files (*.ini) from Jinja2 templates
+#   2) Generate the certificate inventory CSV (certificates.csv)
+#
+# IMPORTANT:
+# - Variables in roles/<role>/vars/main.yml override defaults and many other
+#   variable sources. Use this file for role-internal constants, NOT for
+#   environment-specific values (domains, emails, API tokens).
+# - For real deployments, move provider selections + domain lists to:
+#     - group_vars/<group>/ (recommended), and optionally encrypt with Ansible Vault
+#     - host_vars/<host>/, or playbook vars
+# -----------------------------------------------------------------------------
+
+# DNS provider definitions for DNS-01 challenges
+# Each provider entry controls:
+#   - whether it is active (enabled)
+#   - which ini template is rendered (template)
+#   - what filename is written under certbot_ini_dir (filename)
+#   - which certificates/domains should be associated with that provider
+certbot_dns_providers:
+
+  # ---------------------------------------------------------------------------
+  # Cloudflare DNS provider
+  # ---------------------------------------------------------------------------
+  cloudflare:
+    enabled: True
+    template: "cloudflare.ini.j2"
+    filename: "cloudflare.ini"
+    certificate:
+      # List of domain/email pairs to be written into certificates.csv
+      # Note: template logic supports multiple FQDNs and/or emails per entry.
+      domains:
+        - fqdn:
+            - "repo.example.net"
+          email:
+            - "admin@example.net"
+        - fqdn:
+            - "app.example.net"
+          email:
+            - "admin@example.net"
+        - fqdn:
+            - "web.example.net"
+          email:
+            - "admin@example.net"
+        - fqdn:
+            - "email.example.net"
+          email:
+            - "admin@example.net"
+        - fqdn:
+            - "test.example.net"
+          email:
+            - "admin@example.net"
+
+  # ---------------------------------------------------------------------------
+  # AWS Route53 (placeholder)
+  # NOTE: certbot Route53 auth typically uses AWS credentials/roles rather than
+  # a single "token". Keep disabled unless implemented end-to-end.
+  # ---------------------------------------------------------------------------
+  route53:
+    enabled: False
+    template: "route53.ini.j2"
+    filename: "route53.ini"
+    certificate:
+      domains:
+        - fqdn:
+            - "example.com"
+          email:
+            - "admin@example.com"
+
+  # ---------------------------------------------------------------------------
+  # RFC2136 dynamic DNS updates (TSIG) - placeholder
+  # ---------------------------------------------------------------------------
+  rfc2136:
+    enabled: False
+    template: "rfc2136.ini.j2"
+    filename: "rfc2136.ini"
+    certificate:
+      domains:
+        - fqdn:
+            - "example.com"
+          email:
+            - "admin@example.com"
+
+  # ---------------------------------------------------------------------------
+  # BIND (placeholder)
+  # NOTE: BIND DNS-01 is commonly implemented via RFC2136 updates.
+  # Keep disabled unless you have a dedicated bind.ini.j2 flow.
+  # ---------------------------------------------------------------------------
+  bind:
+    enabled: False
+    template: "bind.ini.j2"
+    filename: "bind.ini"
+    certificate:
+      domains:
+        - fqdn:
+            - "example.com"
+          email:
+            - "admin@example.com"

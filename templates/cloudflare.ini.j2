@@ -1,0 +1,24 @@
+###############################################################################
+# {{ ansible_managed }}
+#
+# SOURCE: {{ ansible_parent_role_paths[0] | default('N/A') }}/templates/{{ template_path | basename }}
+# DATE  : {{ ansible_facts.date_time.iso8601 }}
+# HOST  : {{ inventory_hostname }}
+# USER  : {{ ansible_facts.user_id }}
+#
+# WARNING: Manual changes to this file will be lost the next time
+#          the Ansible playbook is executed.
+###############################################################################
+
+# Certbot Cloudflare DNS Authenticator Credentials
+# ---------------------------------------------------------------------------
+# Requirement: A Cloudflare API Token (Recommended) or Global API Key.
+# Security: This file must be 'chmod 600' to protect your DNS infrastructure.
+
+# RECOMMENDATION: Use an API Token with "Zone:DNS:Edit" permissions.
+# Documentation: https://dash.cloudflare.com/profile/api-tokens
+dns_cloudflare_api_token = {{ cloudflare_api_token | to_json }}
+
+# ALTERNATIVE: If using the older Global API Key, uncomment both lines below:
+# dns_cloudflare_email = admin@example.net
+# dns_cloudflare_api_key = your-global-api-key-here

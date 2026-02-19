@@ -1,0 +1,13 @@
+---
+# tasks/repo-checkout.yml
+# Orchestrates the checkout and update of the certbot repository source code
+
+- name: Certbot RPMrepo | Ensure repo is present and up-to-date (shallow, single-branch)
+  git:
+    repo: "{{ certbot_repo_url }}"
+    dest: "{{ certbot_repo_dir }}"
+    version: "{{ certbot_repo_version | default('main') }}"
+    depth: 1
+    single_branch: True
+    update: True
+    force: True

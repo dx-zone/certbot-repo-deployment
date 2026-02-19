@@ -1,0 +1,19 @@
+---
+# tasks/main.yml
+# Orchestrates full deployment lifecycle for certbot-repo-deployment role
+# Workflow: Install Docker → Fetch project → Render configs → Deploy → Validate
+
+- name: Install and configure Docker Engine (prerequisite)
+  import_tasks: docker-install.yml
+
+- name: Clone or update certbot repository source code
+  import_tasks: repo-checkout.yml
+
+#- name: Generate runtime configuration files (certificates.csv + provider .ini)
+#  import_tasks: config-render.yml
+
+- name: Deploy container stack using Docker Compose
+  import_tasks: compose-up.yml
+
+#- name: Perform post-deployment validation and health checks
+#  import_tasks: validate.yml

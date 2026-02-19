@@ -1,0 +1,231 @@
+---
+# tasks/docker-install.yml
+#
+# -----------------------------------------------------------------------------
+# Role: docker
+#
+# Description:
+#   Installs and configures Docker Engine in an idempotent and production-
+#   ready manner across Debian/Ubuntu and Red Hat–based distributions
+#   (RHEL, AlmaLinux, Rocky, Fedora).
+#
+#   By default, this role enforces installation of Docker CE from the
+#   official Docker repositories, with proper GPG key management,
+#   repository configuration, architecture-aware handling (amd64/arm64/armhf),
+#   and safe service enablement.
+#
+#   The role includes:
+#     - Reliable detection of existing Docker installations
+#     - Optional enforcement of Docker CE over distro-provided packages
+#     - Clean removal of conflicting/legacy packages when required
+#     - Conditional installation of docker-compose-plugin
+#     - Safe service enablement and startup
+#     - Lightweight health validation (docker info)
+#     - Optional runtime container lifecycle verification (hello-world)
+#
+#   Design Goals:
+#     - Strict idempotency
+#     - Cross-distro compatibility
+#     - Clear install intent (CE vs future distro option)
+#     - Safe execution in enterprise and restricted network environments
+#
+# Requirements:
+#   - Ansible 2.8+
+#   - Privileged (become: True)
+#
+# -----------------------------------------------------------------------------
+
+
+# -----------------------------
+# Defaults (defined in defaults/main.yml)
+# -----------------------------
+
+# -----------------------------
+# Better "is Docker installed?" signal
+# -----------------------------
+- name: Docker | Collect package facts
+  package_facts:
+    manager: auto
+
+- name: Docker | Check if docker binary exists
+  stat:
+    path: /usr/bin/docker
+  register: docker_bin
+
+- name: Docker | Detect installed status (binary OR package)
+  set_fact:
+    docker_present: >-
+      {{
+        docker_bin.stat.exists
+        or ('docker-ce' in ansible_facts.packages)
+        or ('docker-ce-cli' in ansible_facts.packages)
+        or ('docker.io' in ansible_facts.packages)
+        or ('docker' in ansible_facts.packages)
+      }}
+
+- name: Docker | Debian-specific repository setup (CE)
+  block:
+    - name: Docker | Debian facts (codename + arch)
+      set_fact:
+        docker_distro: "{{ 'ubuntu' if ansible_facts.distribution == 'Ubuntu' else 'debian' }}"
+        docker_codename: >-
+          {{
+            (ansible_facts.lsb.codename | default(''))
+            | default(ansible_facts.distribution_release)
+          }}
+        docker_arch: >-
+          {{
+            {
+              'x86_64': 'amd64',
+              'aarch64': 'arm64',
+              'armv7l': 'armhf'
+            }.get(ansible_facts.architecture, ansible_facts.architecture)
+          }}
+
+    - name: Docker | Debian prerequisites
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: True
+
+    - name: Docker | Ensure keyrings dir exists
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Docker | Install Docker GPG key (keyring)
+      get_url:
+        url: "https://download.docker.com/linux/{{ docker_distro }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Docker | Add Docker CE apt repo
+      apt_repository:
+        repo: >-
+          deb [arch={{ docker_arch }} signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/{{ docker_distro }} {{ docker_codename }} stable
+        filename: docker
+        state: present
+        update_cache: True
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - docker_install_flavor == 'ce'
+
+# -----------------------------
+# RedHat / Fedora / Alma / Rocky (Docker CE repo)
+# -----------------------------
+- name: Docker | RedHat-specific repository setup (CE)
+  block:
+    - name: Docker | Install repo tooling
+      package:
+        name:
+          - yum-utils
+          - ca-certificates
+          - curl
+        state: present
+
+    - name: Docker | Add Docker CE repo
+      get_url:
+        url: "https://download.docker.com/linux/{{ 'fedora' if ansible_facts.distribution == 'Fedora' else 'centos' }}/docker-ce.repo"
+        dest: /etc/yum.repos.d/docker-ce.repo
+        mode: "0644"
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - docker_install_flavor == 'ce'
+
+# -----------------------------
+# Install packages
+# -----------------------------
+- name: Docker | Define package list (CE)
+  set_fact:
+    docker_pkgs: >-
+      {{
+        ['docker-ce', 'docker-ce-cli', 'containerd.io']
+        + (['docker-compose-plugin'] if docker_compose_plugin else [])
+      }}
+  when: docker_install_flavor == 'ce'
+
+- name: Docker | Install Docker (CE)
+  package:
+    name: "{{ docker_pkgs }}"
+    state: present
+  register: docker_install
+  when: docker_install_flavor == 'ce'
+
+# If you ever want a "distro" path later, implement it explicitly.
+- name: Docker | Fail if unsupported flavor selected
+  fail:
+    msg: "Unsupported docker_install_flavor='{{ docker_install_flavor }}'. Use 'ce' or extend role for 'distro'."
+  when: docker_install_flavor not in ['ce', 'distro']
+
+# -----------------------------
+# Enable & start service (only when we installed or already had docker)
+# -----------------------------
+- name: Docker | Re-check docker binary after install
+  stat:
+    path: /usr/bin/docker
+  register: docker_bin_after
+
+- name: Docker | Ensure Docker service enabled and started
+  service:
+    name: docker
+    state: started
+    enabled: True
+  when: docker_bin_after.stat.exists
+
+# -----------------------------
+# Lightweight health check (no Docker Hub dependency)
+# -----------------------------
+- name: Docker | Health check (docker info)
+  command: docker info
+  register: docker_info
+  changed_when: False
+  when: docker_bin_after.stat.exists
+
+# Optional: real container lifecycle verification (pulls image; may fail in not Internet is available)
+- name: Docker | Container lifecycle verification (hello-world)
+  command: docker run --rm hello-world
+  register: docker_test
+  changed_when: false
+  when:
+    - docker_bin_after.stat.exists
+    - docker_run_container_test | bool
+    - ((docker_install is defined and docker_install.changed)
+      or (docker_info is defined and docker_info.rc == 0))
+
+- name: Docker | Container lifecycle verification result
+  debug:
+    msg: |
+      🚀 Docker Container Runtime Verification
+
+      Status      : {{ 'SUCCESS ✅' if docker_test.rc == 0 else 'FAILED ❌' }}
+      Exit Code   : {{ docker_test.rc }}
+
+      {{ 'Docker daemon is running and containers can be created, executed, and removed successfully.'
+         if docker_test.rc == 0
+         else 'Container execution failed. Review error details below.' }}
+
+      --- STDOUT ---
+      {{ docker_test.stdout | default('N/A') | trim }}
+
+      --- STDERR ---
+      {{ docker_test.stderr | default('N/A') | trim }}
+  when:
+    - docker_run_container_test | bool
+    - docker_test is defined
+
+# -----------------------------
+# Final status
+# -----------------------------
+- name: Docker | Final status
+  debug:
+    msg: >-
+      Docker is ready on {{ ansible_facts.distribution }}
+      ({{ 'Already existed' if docker_present else 'Installed now' }});
+      flavor={{ docker_install_flavor }},
+      smoke_test={{ docker_run_container_test | bool }}
+  when: docker_bin_after.stat.exists

@@ -1,0 +1,14 @@
+---
+- name: Deploy certbot-rpm-mtls-repo via Ansible role
+  hosts: localhost
+  become: true
+  remote_user: root
+  gather_facts: true
+  vars:
+    # Optional: Only gather subset of facts to speed up execution
+    gather_subset:
+      - '!all'
+      - 'min'
+      - 'date_time'
+  roles:
+    - role: certbot-repo-deployment

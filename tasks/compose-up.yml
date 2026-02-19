@@ -1,0 +1,151 @@
+---
+# tasks/compose-up.yml
+#
+# Brings up the certbot + rpmrepo stack via Docker Compose (v2),
+# ensuring required bind-mount directories and permissions exist.
+
+- name: Compose Up | Ensure persistent host directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ certbot_repo_owner }}"
+    group: "{{ certbot_repo_group }}"
+    mode: "0775"
+  loop:
+    - "{{ certbot_data_dir }}"
+    - "{{ rpmrepo_rpms_dir }}"
+    - "{{ certbot_ini_dir }}"
+    - "{{ rpmrepo_pki_dir }}"
+
+# Secrets directories: readable only by owner/group (container UID/GID), no world access
+- name: Compose Up | Harden secrets directory permissions
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ certbot_repo_owner }}"
+    group: "{{ certbot_repo_group }}"
+    mode: "0750"
+  loop:
+    - "{{ certbot_ini_dir }}"
+    - "{{ rpmrepo_pki_dir }}"
+
+# -----------------------------
+# Templates
+# -----------------------------
+
+- name: Compose Up | Render .env for docker compose stack
+  template:
+    src: env.j2
+    dest: "{{ certbot_stack_env_file }}"
+    owner: "{{ certbot_repo_owner }}"
+    group: "{{ certbot_repo_group }}"
+    mode: "0640"
+  become: True
+
+
+- name: Compose Up | Render certificates inventory CSV
+  template:
+    src: "certificates.csv.j2"
+    dest: "{{ certbot_cert_inventory_file }}"
+    owner: "{{ certbot_repo_owner }}"
+    group: "{{ certbot_repo_group }}"
+    mode: "0644"
+
+- name: Compose Up | Render DNS provider *.ini files
+  template:
+    src: "{{ item.value.template }}"
+    dest: "{{ certbot_ini_dir }}/{{ item.value.filename }}"
+    owner: "{{ certbot_repo_owner }}"
+    group: "{{ certbot_repo_group }}"
+    mode: "0600"
+  loop: "{{ certbot_dns_providers | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: item.value.enabled | default(False) | bool
+
+- name: Compose Up | Secure DNS provider *.ini files (chmod 0600)
+  file:
+    path: "{{ item.path }}"
+    owner: "{{ certbot_repo_owner }}"
+    group: "{{ certbot_repo_group }}"
+    mode: "0600"
+  loop: "{{ (lookup('ansible.builtin.fileglob', certbot_ini_dir ~ '/*.ini', wantlist=True) | map('regex_replace', '^(.*)$', '{\"path\":\"\\1\"}') | map('from_json') | list) }}"
+  when: (lookup('ansible.builtin.fileglob', certbot_ini_dir ~ '/*.ini', wantlist=True) | length) > 0
+
+# -----------------------------
+# Docker Compose up (v2)
+# -----------------------------
+
+- name: Compose Up | Start stack (docker compose up -d)
+  community.docker.docker_compose_v2:
+    project_src: "{{ certbot_repo_dir }}"
+    state: present
+    pull: "{{ compose_pull | default('policy') }}"          # pull image if missing (or per chosen policy)
+    build: "{{ compose_build | default('policy') }}"        # build only when Compose indicates a build context
+    remove_orphans: True
+    recreate: "{{ compose_recreate | default('auto') }}"    # auto is idempotent
+  register: compose_up
+
+- name: Compose Up | Show compose result summary
+  debug:
+    msg: |
+      🐳 Docker Compose applied
+      Changed : {{ compose_up.changed | default(False) }}
+      Actions : {{ compose_up.actions | default([]) }}
+
+# -----------------------------
+# Post-checks
+# -----------------------------
+
+- name: Compose Up | Show container status (docker compose ps -a)
+  command: docker compose ps -a
+  args:
+    chdir: "{{ certbot_repo_dir }}"
+  register: compose_ps
+  changed_when: False
+
+- name: Compose Up | Container status output
+  debug:
+    msg: "{{ compose_ps.stdout_lines }}"
+
+# -----------------------------
+# Optional validation pipeline
+# -----------------------------
+
+- name: PKI Pipeline Validation and Audit
+  when: run_pipeline_validation | default(true) | bool
+  block:
+    - name: Compose Up | Capture stack status and certificate audit
+      ansible.builtin.command: "./manage-certbo-repo-client-stack.sh status"
+      args:
+        chdir: "{{ certbot_repo_dir }}"
+      become: true
+      register: stack_status
+      changed_when: false
+      failed_when: false
+
+    - name: Compose Up | Display Stack Status Report
+      ansible.builtin.debug:
+        msg: |
+          {{ stack_status.stdout }}
+      when: stack_status.stdout is defined
+
+    - name: Compose Up | Run PKI pipeline validation script
+      ansible.builtin.command: "bash ./validate-pki-pipeline.sh"
+      args:
+        chdir: "{{ certbot_repo_dir }}"
+      register: validate_pki
+      failed_when: false
+      changed_when: false
+
+    - name: Compose Up | PKI pipeline validation result
+      ansible.builtin.debug:
+        msg: |
+          🔎 PKI Pipeline Validation Result
+          Status   : {{ 'PASS ✅' if validate_pki.rc == 0 else 'FAIL ❌' }}
+          ExitCode : {{ validate_pki.rc }}
+          --- STDOUT ---
+          {{ validate_pki.stdout | default('') | trim }}
+          --- STDERR ---
+          {{ validate_pki.stderr | default('') | trim }}
+      when: validate_pki is defined

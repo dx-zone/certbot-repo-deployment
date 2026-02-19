@@ -1,0 +1,166 @@
+# -----------------------------------------------------------------------------
+# Secrets for DNS provider credentials (used by Certbot DNS-01 plugins)
+#
+# Do NOT store real secrets in defaults. Override via group_vars/host_vars,
+# Ansible Vault, external secret managers, or environment injection.
+#
+# Recommended Ansible Vault layout:
+#   mkdir -p group_vars/certbot_hosts
+#   ansible-vault create --vault-id prod@./.vault_pass group_vars/certbot_hosts/vault.yml
+#
+# Example vault.yml contents:
+#   cloudflare_api_token: "..."
+#
+# Run:
+#   ansible-playbook -i inventory/hosts.ini playbooks/deploy-certbot-repo.yml \
+#     --vault-id prod@./.vault_pass
+# -----------------------------------------------------------------------------
+#
+# API key for Cloudflare DNS provider
+cloudflare_api_token: "REAL_VALUE_GOES_HERE"          # Placeholder (Cloudflare DNS requires API token)
+
+# API key for AWS Route53 DNS provider
+route53_creds_token: "REAL_VALUE_GOES_HERE"          # Placeholder (Route53 usually uses AWS creds/roles)
+
+# TSIG key for BIND DNS server
+# Placeholder (usually needs name/secret/algo/server)
+rfc2136_tsig_key_name: "REAL_VALUE_GOES_HERE"
+rfc2136_tsig_key_secret: "REAL_VALUE_GOES_HERE"
+rfc2136_tsig_key_algorithm: "REAL_VALUE_GOES_HERE"
+rfc2136_tsig_key_server: "REAL_VALUE_GOES_HERE"
+rfc2136_tsig_key_port: "REAL_VALUE_GOES_HERE"
+
+# TSIG key for BIND DNS server
+# Placeholder (usually needs name/secret/algo/server) (often RFC2136-style)
+bind_tsig_name: "REAL_VALUE_GOES_HERE"
+bind_tsig_secret: "REAL_VALUE_GOES_HERE"
+bind_tsig_algorithm: "REAL_VALUE_GOES_HERE"
+bind_tsig_server: "REAL_VALUE_GOES_HERE"
+bind_tsig_port: "REAL_VALUE_GOES_HERE"
+
+# -----------------------------------------------------------------------------
+# Stack Environment (.env) Variables
+#
+# The upstream docker-compose stack expects a .env file in the repository root.
+# This role renders that file so the deployment is reproducible and non-interactive.
+#
+# REPO_FQDN
+#   - Used by rpmrepo (Apache) to set ServerName and select TLS cert paths
+#   - MUST be present in certificates.csv for Let's Encrypt issuance
+#   - Used by client-test to resolve the repository hostname
+#
+# CA_NAME
+#   - Common Name label for the internal mTLS client CA (trust store display name)
+#
+# CLIENT_NAME
+#   - File/identity prefix for the mTLS client certificate and key
+#   - In production you may want this to match the client hostname/identity
+# -----------------------------------------------------------------------------
+certbot_stack_repo_fqdn: "repo.example.com"
+certbot_stack_ca_name: "Internal-RPM-Repo-CA"
+certbot_stack_client_name: "client-identity"
+
+# Render .env file in the repo root (docker-compose expects this)
+certbot_stack_env_file: "{{ certbot_repo_dir }}/.env"
+
+# -----------------------------------------------------------------------------
+# Role Variables (High Precedence)
+#
+# This file defines the DNS provider configuration used to:
+#   1) Render provider credential files (*.ini) from Jinja2 templates
+#   2) Generate the certificate inventory CSV (certificates.csv)
+#
+# IMPORTANT:
+# - Variables in roles/<role>/vars/main.yml override defaults and many other
+#   variable sources. Use this file for role-internal constants, NOT for
+#   environment-specific values (domains, emails, API tokens).
+# - For real deployments, move provider selections + domain lists to:
+#     - group_vars/<group>/ (recommended), and optionally encrypt with Ansible Vault
+#     - host_vars/<host>/, or playbook vars
+# -----------------------------------------------------------------------------
+
+# DNS provider definitions for DNS-01 challenges
+# Each provider entry controls:
+#   - whether it is active (enabled)
+#   - which ini template is rendered (template)
+#   - what filename is written under certbot_ini_dir (filename)
+#   - which certificates/domains should be associated with that provider
+certbot_dns_providers:
+
+  # ---------------------------------------------------------------------------
+  # Cloudflare DNS provider
+  # ---------------------------------------------------------------------------
+  cloudflare:
+    enabled: True
+    template: "cloudflare.ini.j2"
+    filename: "cloudflare.ini"
+    certificate:
+      # List of domain/email pairs to be written into certificates.csv
+      # Note: template logic supports multiple FQDNs and/or emails per entry.
+      domains:
+        - fqdn:
+            - "repo.example.net"
+          email:
+            - "admin@example.net"
+        - fqdn:
+            - "app.example.net"
+          email:
+            - "admin@example.net"
+        - fqdn:
+            - "web.example.net"
+          email:
+            - "admin@example.net"
+        - fqdn:
+            - "email.example.net"
+          email:
+            - "admin@example.net"
+        - fqdn:
+            - "test.example.net"
+          email:
+            - "admin@example.net"
+
+  # ---------------------------------------------------------------------------
+  # AWS Route53 (placeholder)
+  # NOTE: certbot Route53 auth typically uses AWS credentials/roles rather than
+  # a single "token". Keep disabled unless implemented end-to-end.
+  # ---------------------------------------------------------------------------
+  route53:
+    enabled: False
+    template: "route53.ini.j2"
+    filename: "route53.ini"
+    certificate:
+      domains:
+        - fqdn:
+            - "example.net"
+          email:
+            - "admin@example.net"
+
+  # ---------------------------------------------------------------------------
+  # RFC2136 dynamic DNS updates (TSIG) - placeholder
+  # ---------------------------------------------------------------------------
+  rfc2136:
+    enabled: False
+    template: "rfc2136.ini.j2"
+    filename: "rfc2136.ini"
+    certificate:
+      domains:
+        - fqdn:
+            - "example.net"
+          email:
+            - "admin@example.net"
+
+  # ---------------------------------------------------------------------------
+  # BIND (placeholder)
+  # NOTE: BIND DNS-01 is commonly implemented via RFC2136 updates.
+  # Keep disabled unless you have a dedicated bind.ini.j2 flow.
+  # ---------------------------------------------------------------------------
+  bind:
+    enabled: False
+    template: "bind.ini.j2"
+    filename: "bind.ini"
+    certificate:
+      domains:
+        - fqdn:
+            - "example.net"
+          email:
+            - "admin@example.net"

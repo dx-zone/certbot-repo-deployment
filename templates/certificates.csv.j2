@@ -1,0 +1,20 @@
+{#
+  SOURCE: {{ ansible_parent_role_paths[0] | default('N/A') }}/templates/{{ template_path | basename }}
+  MANAGED BY ANSIBLE - DO NOT EDIT MANUALLY
+#}
+fqdn,dns_provider,email
+{% for provider_name, provider in (certbot_dns_providers | default({})).items() %}
+{%   if provider.enabled | default(false) | bool %}
+{%     for domain_entry in provider.certificate.domains | default([]) %}
+{%       set fqdn_list = domain_entry.fqdn | default([]) %}
+{%       set email_list = domain_entry.email | default([]) %}
+{%       if fqdn_list is string %}{% set fqdn_list = [fqdn_list] %}{% endif %}
+{%       if email_list is string %}{% set email_list = [email_list] %}{% endif %}
+{%       for fqdn in fqdn_list %}
+{%         for email in email_list %}
+{{ fqdn }},{{ provider_name }},{{ email }}
+{%         endfor %}
+{%       endfor %}
+{%     endfor %}
+{%   endif %}
+{% endfor %}
